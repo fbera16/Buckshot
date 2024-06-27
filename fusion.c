@@ -39,17 +39,6 @@ void closeSDL();
 void renderTitle();
 void renderButtons();
 bool renderGame(); // Render function for the game state
-bool quit = false;
-
-// SDL variables
-SDL_Window *gWindow = NULL;
-SDL_Renderer *gRenderer = NULL;
-SDL_Texture *gTitleTexture = NULL;
-SDL_Texture *gLaunchButtonTexture = NULL;
-SDL_Texture *gQuitButtonTexture = NULL;
-SDL_Rect gTitleRect;                              // Rectangle for the title
-SDL_Rect gLaunchButtonRect = {100, 100, 200, 50}; // Exemple de position et taille
-SDL_Rect gQuitButtonRect = {100, 200, 200, 50};   // Exemple de position et taille
 
 typedef enum
 {
@@ -69,12 +58,27 @@ typedef struct
     SDL_Texture *texture;
 } GridCell;
 
-enum GameState
+typedef enum 
 {
     STATE_MENU,
     STATE_GAME,
+    STATE_SCOREBOARD,
     STATE_QUIT
-};
+} GameState;
+
+// Global variables
+SDL_Window *gWindow = NULL;
+SDL_Renderer *gRenderer = NULL;
+SDL_Texture *gLaunchButtonTexture = NULL;
+SDL_Texture *gScoreboardButtonTexture = NULL;
+SDL_Texture *gQuitButtonTexture = NULL;
+SDL_Texture *gTitleTexture = NULL; // Ajout de gTitleTexture
+SDL_Rect gLaunchButtonRect = {100, 100, 200, 50};
+SDL_Rect gScoreboardButtonRect = {100, 200, 200, 50};
+SDL_Rect gQuitButtonRect = {100, 300, 200, 50};
+SDL_Rect gTitleRect = {100, 50, 600, 100}; // Ajout de gTitleRect
+GameState currentState = STATE_MENU;
+bool quit = false;
 
 SDL_Texture *loadTexture(SDL_Renderer *renderer, const char *path)
 {
@@ -397,6 +401,18 @@ bool ordinateurTour(int *vieJoueur, int *vieOrdi, int *rouges, int *noirs, int *
         {
             printf("L'ordinateur a tiré sur lui-même et la balle était noire.\n");
             *noirs -= 1;
+            *nombreDeBalles -= 1;
+    for (int i = 0; i < *nombreDeBalles; i++)
+    {
+        balles[i] = balles[i + 1];
+    }
+    balles[*nombreDeBalles] = -1;
+
+    printf("Balles restantes après le tour de l'ordinateur:\n");
+    for (int i = 0; i < *nombreDeBalles; i++)
+    {
+        printf("Balle %d: %s\n", i + 1, balles[i] == ROUGE ? "Rouge" : "Noir");
+    }
             return true;
         }
     }
@@ -543,6 +559,48 @@ void giveObject(GridCell subgrids[4][SUBGRID_ROWS][SUBGRID_COLS], SDL_Texture *t
     }
 }
 
+int generateRandomAmount() {
+    return (rand() % 701) + 500; // Génère un nombre entre 500 et 1200
+}
+
+#define MAX_NAME_LENGTH 100
+
+// Structure pour stocker les informations du joueur
+typedef struct {
+    char name[MAX_NAME_LENGTH];
+} Player;
+
+// Fonction pour demander le prénom du joueur
+void askPlayerName(Player *player) {
+    printf("Veuillez entrer votre prénom: ");
+    fgets(player->name, MAX_NAME_LENGTH, stdin);
+
+    // Supprimer le caractère de nouvelle ligne à la fin
+    size_t len = strlen(player->name);
+    if (len > 0 && player->name[len-1] == '\n') {
+        player->name[len-1] = '\0';
+    }
+}
+
+// Fonction pour sauvegarder le score dans un fichier texte
+void saveScore(int score, const Player *player) {
+    FILE *file = fopen("scores.txt", "a"); // Ouvre le fichier en mode ajout
+    if (file == NULL) {
+        fprintf(stderr, "Erreur d'ouverture du fichier des scores.\n");
+        return;
+    }
+    fprintf(file, "%s, %d\n", player->name, score);
+    fclose(file);
+}
+
+// Appeler cette fonction lorsque le joueur gagne
+void onPlayerWin(Player *player) {
+    int score = generateRandomAmount();
+    saveScore(score, player);
+    printf("Félicitations %s! Vous avez gagné %d$.\n", player->name, score);
+}
+
+
 // Initialize SDL and resources
 bool initializeSDL()
 {
@@ -581,8 +639,13 @@ bool initializeSDL()
     gLaunchButtonRect.w = BUTTON_WIDTH;
     gLaunchButtonRect.h = BUTTON_HEIGHT;
 
+    gScoreboardButtonRect.x = (WINDOW_WIDTH - BUTTON_WIDTH) / 2;
+    gScoreboardButtonRect.y = WINDOW_HEIGHT / 2 + BUTTON_HEIGHT / 2 + 10;
+    gScoreboardButtonRect.w = BUTTON_WIDTH;
+    gScoreboardButtonRect.h = BUTTON_HEIGHT;
+
     gQuitButtonRect.x = (WINDOW_WIDTH - BUTTON_WIDTH) / 2;
-    gQuitButtonRect.y = WINDOW_HEIGHT / 2 + BUTTON_HEIGHT / 2 + 20;
+    gQuitButtonRect.y = WINDOW_HEIGHT / 2 + BUTTON_HEIGHT + BUTTON_HEIGHT / 2 + 20;
     gQuitButtonRect.w = BUTTON_WIDTH;
     gQuitButtonRect.h = BUTTON_HEIGHT;
 
@@ -614,6 +677,12 @@ bool loadMedia()
         return false;
     }
 
+    gScoreboardButtonTexture = loadTexture(gRenderer, "scoreboard.png");
+    if (gScoreboardButtonTexture == NULL) {
+        printf("Failed to load scoreboard button texture!\n");
+        return false;
+    }
+
     gQuitButtonTexture = loadTexture(gRenderer, "quit_button.png");
     if (gQuitButtonTexture == NULL)
     {
@@ -642,14 +711,20 @@ void renderTitle()
 }
 
 // Render buttons on the screen
-void renderButtons()
-{
+void renderButtons() {
+    // Afficher le bouton "Jouer"
     SDL_RenderCopy(gRenderer, gLaunchButtonTexture, NULL, &gLaunchButtonRect);
+    
+    // Afficher le bouton "Scoreboard"
+    SDL_RenderCopy(gRenderer, gScoreboardButtonTexture, NULL, &gScoreboardButtonRect);
+    
+    // Afficher le bouton "Quitter"
     SDL_RenderCopy(gRenderer, gQuitButtonTexture, NULL, &gQuitButtonRect);
 }
 
+
 // Render game content on the screen
-bool renderGame()
+bool renderGame(Player *player)
 {
     SDL_Window *window = NULL;
     SDL_Renderer *renderer = NULL;
@@ -813,8 +888,9 @@ bool renderGame()
     while (!quitGame && manche <= 3)
     {
         printf("while quit/manche\n");
+        if(vieJoueur <= 0 || vieOrdi <= 0){
         vieJoueur = 3 + rand() % 4; // Vie du joueur entre 3 et 6
-        vieOrdi = vieJoueur;
+        vieOrdi = vieJoueur;}
         printf("Manche %d: Vie Joueur = %d, Vie Ordi = %d\n", manche, vieJoueur, vieOrdi);
 
         genererBalles(balles, &rouges, &noirs, &nombreDeBalles);
@@ -970,6 +1046,7 @@ bool renderGame()
     if (manche > 3 && vieJoueur > 0)
     {
         printf("Vous avez gagné les 3 manches !\n");
+        onPlayerWin(player);
     }
 
     // Libération des ressources
@@ -1008,14 +1085,15 @@ int main(int argc, char *argv[])
 
     SDL_Event e;
     int currentState = STATE_MENU;
+    bool quit = false;
 
-    while (currentState != STATE_QUIT)
+    while (!quit)
     {
         while (SDL_PollEvent(&e))
         {
             if (e.type == SDL_QUIT)
             {
-                currentState = STATE_QUIT;
+                quit = true;
             }
         }
 
@@ -1027,7 +1105,7 @@ int main(int argc, char *argv[])
             {
                 if (e.type == SDL_QUIT)
                 {
-                    currentState = STATE_QUIT;
+                    quit = true;
                 }
                 else if (e.type == SDL_MOUSEBUTTONDOWN)
                 {
@@ -1040,31 +1118,47 @@ int main(int argc, char *argv[])
                         currentState = STATE_GAME;
                     }
 
+                    if (mouseX >= gScoreboardButtonRect.x && mouseX <= (gScoreboardButtonRect.x + gScoreboardButtonRect.w) &&
+                        mouseY >= gScoreboardButtonRect.y && mouseY <= (gScoreboardButtonRect.y + gScoreboardButtonRect.h))
+                    {
+                        currentState = STATE_SCOREBOARD;
+                    }
+
                     if (mouseX >= gQuitButtonRect.x && mouseX <= (gQuitButtonRect.x + gQuitButtonRect.w) &&
                         mouseY >= gQuitButtonRect.y && mouseY <= (gQuitButtonRect.y + gQuitButtonRect.h))
                     {
-                        currentState = STATE_QUIT;
+                        quit = true;
                     }
                 }
             }
             break;
 
         case STATE_GAME:
-            if (renderGame())
+                Player player;
+        
+        // Demander le prénom du joueur
+        askPlayerName(&player);
+            if (renderGame(&player))
             {
                 currentState = STATE_QUIT;
             }
             else
             {
                 currentState = STATE_MENU;
+
             }
             break;
 
         case STATE_QUIT:
+            quit = true;
             break;
+
+
         }
+        renderMenu();
     }
 
     closeSDL();
     return 0;
 }
+
